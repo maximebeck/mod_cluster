@@ -76,11 +76,11 @@ public class TestStickyRemove extends TestCase {
         wait.start();
 
         // Wait until httpd as received the nodes information.
-        try {
-            Thread.sleep(30000);
-        } catch (InterruptedException ex) {
-            ex.printStackTrace();
-        }
+        String [] nodes = new String[2];
+        nodes[0] = "node3";
+        nodes[1] = "node4";
+        if (!Maintest.TestForNodes(cluster, nodes))
+            fail("can't start nodes");
 
         // Start the client and wait for it.
         Client client = new Client();
@@ -141,11 +141,10 @@ public class TestStickyRemove extends TestCase {
         }
 
         // Wait until httpd as received the stop messages.
-        try {
-            Thread.sleep(5000);
-        } catch (InterruptedException ex) {
-            ex.printStackTrace();
-        }
+        Maintest.testPort(8010);
+        Maintest.testPort(8889);
+        if (!Maintest.TestForNodes(cluster, null))
+            System.out.println("Can't stop nodes");
         Maintest.StopClusterListener();
 
         // Test client result.
