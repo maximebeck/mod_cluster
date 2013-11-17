@@ -35,6 +35,7 @@
 #include "http_request.h"
 #include "http_protocol.h"
 #include "http_core.h"
+#include "scoreboard.h"
 #include "ap_mpm.h"
 #include "mod_proxy.h"
 
@@ -650,12 +651,20 @@ static void update_workers_node(proxy_server_conf *conf, apr_pool_t *pool, serve
 static apr_status_t proxy_cluster_try_pingpong(request_rec *r, proxy_worker *worker,
                                                char *url, proxy_server_conf *conf,
                                                apr_interval_time_t ping, apr_interval_time_t workertimeout);
-static proxy_worker *get_worker_from_id(proxy_server_conf *conf, int id, proxy_worker_stat *stat)
+static proxy_worker *get_worker_from_id(proxy_server_conf *conf, int id, proxy_worker_stat *stat, server_rec *server)
 {
     int i;
     char *ptr = conf->workers->elts;
     int sizew = conf->workers->elt_size;
 
+    for (i = 0; i < conf->workers->nelts; i++, ptr=ptr+sizew) {
+        proxy_worker *worker = (proxy_worker *) ptr;
+        if (worker->id == id && worker->s == stat) {
+                    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
+                     "get_worker_from_id: %d %s %d", worker->id, worker->hostname, worker->port); 
+        }
+    }
+    ptr = conf->workers->elts;
     for (i = 0; i < conf->workers->nelts; i++, ptr=ptr+sizew) {
         proxy_worker *worker = (proxy_worker *) ptr;
         if (worker->id == id && worker->s == stat) {
@@ -704,11 +713,17 @@ static void update_workers_lbstatus(proxy_server_conf *conf, apr_pool_t *pool, s
                 apr_status_t rv;
                 apr_pool_t *rrp;
                 request_rec *rnew;
-                proxy_worker *worker = get_worker_from_id(conf, id[i], stat);
+                apr_thread_mutex_lock(lock);
+                proxy_worker *worker = get_worker_from_id(conf, id[i], stat, server);
+                apr_thread_mutex_unlock(lock);
                 if (worker == NULL)
                     continue; /* skip it */
-                apr_snprintf(sport, sizeof(sport), ":%d", worker->port);
-                url = apr_pstrcat(pool, worker->scheme, "://", worker->hostname,  sport, "/", NULL);
+                apr_snprintf(sport, sizeof(sport), "%d", worker->port);
+                if (strcmp(worker->scheme, ou->mess.Type) ||
+                    strcmp(worker->hostname, ou->mess.Host) ||
+                    strcmp(sport, ou->mess.Port))
+                    continue; /* skip it */
+                url = apr_pstrcat(pool, worker->scheme, "://", worker->hostname, ":", sport, "/", NULL);
 
                 apr_pool_create(&rrp, pool);
                 apr_pool_tag(rrp, "subrequest");
@@ -725,10 +740,20 @@ static void update_workers_lbstatus(proxy_server_conf *conf, apr_pool_t *pool, s
 
                 worker->s->error_time = 0; /* Force retry now */
                 rv = proxy_cluster_try_pingpong(rnew, worker, url, conf, ou->mess.ping, ou->mess.timeout);
+
+                if (node_storage->read_node(id[i], &ou) != APR_SUCCESS)
+                    continue;
+                if (strcmp(worker->scheme, ou->mess.Type) ||
+                    strcmp(worker->hostname, ou->mess.Host) ||
+                    strcmp(sport, ou->mess.Port))
+                    continue; /* skip it */
+
                 if (rv != APR_SUCCESS) {
                     /* We can't reach the node */
                     worker->s->status |= PROXY_WORKER_IN_ERROR;
                     ou->mess.num_failure_idle++;
+                    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
+                     "proxy_cluster_try_pingpong failed: %d" , ou->mess.num_failure_idle);
                     if (ou->mess.num_failure_idle > 60) {
                         /* Failing for 5 minutes: time to mark it removed */
                         ou->mess.remove = 1;
@@ -1515,6 +1540,7 @@ static int proxy_node_isup(request_rec *r, int id, int load)
         void *sconf = s->module_config;
         int sizew;
         char *ptr;
+        int nb = 0;
         conf = (proxy_server_conf *) ap_get_module_config(sconf, &proxy_module);
         sizew = conf->workers->elt_size;
 
@@ -1522,6 +1548,30 @@ static int proxy_node_isup(request_rec *r, int id, int load)
         for (i = 0; i < conf->workers->nelts; i++, ptr=ptr+sizew) {
             worker = (proxy_worker *)ptr;
             if (worker->id == id && worker->s == stat) {
+                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                 "proxy_node_isup: %d %s %d", worker->id, worker->hostname, worker->port); 
+                nb++;
+
+            }
+        }
+        if (nb>1) {
+            /* There is an issue with the workers, to be on the safe side restart the process on the net request */
+            ap_my_generation--; /* mark old generation that will recreate the process */
+        }
+
+        ptr = conf->workers->elts;
+        for (i = 0; i < conf->workers->nelts; i++, ptr=ptr+sizew) {
+            worker = (proxy_worker *)ptr;
+            if (worker->id == id && worker->s == stat) {
+
+                /* Check that the worker is really the one we need */
+                char sport[7];
+                apr_snprintf(sport, sizeof(sport), "%d", worker->port);
+                if (strcmp(worker->scheme, node->mess.Type) ||
+                    strcmp(worker->hostname, node->mess.Host) ||
+                    strcmp(sport, node->mess.Port))
+                    continue; /* skip it */
+
                 foundid = id;
                 break;
             }
