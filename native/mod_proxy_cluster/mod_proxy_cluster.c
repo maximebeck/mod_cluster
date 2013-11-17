@@ -740,6 +740,7 @@ static void update_workers_lbstatus(proxy_server_conf *conf, apr_pool_t *pool, s
                     strcmp(worker->hostname, ou->mess.Host) ||
                     strcmp(sport, ou->mess.Port)) {
                     /* the worker doesn't correspond to the node */
+                    worker->id = 0;
                     ap_my_generation--; /* mark old generation that will recreate the process */ 
                     continue; /* skip it */
                 }
@@ -1554,23 +1555,17 @@ static int proxy_node_isup(request_rec *r, int id, int load)
         void *sconf = s->module_config;
         int sizew;
         char *ptr;
-        int nb = 0;
         conf = (proxy_server_conf *) ap_get_module_config(sconf, &proxy_module);
         sizew = conf->workers->elt_size;
 
+        /* TODO remove : trace */
         ptr = conf->workers->elts;
         for (i = 0; i < conf->workers->nelts; i++, ptr=ptr+sizew) {
             worker = (proxy_worker *)ptr;
             if (worker->id == id && worker->s == stat) {
                 ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                  "proxy_node_isup: %d %s %d", worker->id, worker->hostname, worker->port); 
-                nb++;
-
             }
-        }
-        if (nb>1) {
-            /* There is an issue with the workers, to be on the safe side restart the process on the net request */
-            ap_my_generation--; /* mark old generation that will recreate the process */
         }
 
         ptr = conf->workers->elts;
@@ -1583,8 +1578,11 @@ static int proxy_node_isup(request_rec *r, int id, int load)
                 apr_snprintf(sport, sizeof(sport), "%d", worker->port);
                 if (strcmp(worker->scheme, node->mess.Type) ||
                     strcmp(worker->hostname, node->mess.Host) ||
-                    strcmp(sport, node->mess.Port))
+                    strcmp(sport, node->mess.Port)) {
+                    worker->id = 0;
+                    ap_my_generation--; /* mark old generation that will recreate the process */
                     continue; /* skip it */
+                }
 
                 foundid = id;
                 break;
