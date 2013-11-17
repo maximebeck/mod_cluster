@@ -533,7 +533,7 @@ static int remove_workers_node(nodeinfo_t *node, proxy_server_conf *conf, apr_po
     }
 
     /* prevent other threads using it */
-    worker->s->status = worker->s->status |= PROXY_WORKER_IN_ERROR;
+    worker->s->status = worker->s->status | PROXY_WORKER_IN_ERROR;
 
     /* apr_reslist_acquired_count */
     i = 0;
@@ -729,8 +729,9 @@ static void update_workers_lbstatus(proxy_server_conf *conf, apr_pool_t *pool, s
                 apr_status_t rv;
                 apr_pool_t *rrp;
                 request_rec *rnew;
+                proxy_worker *worker;
                 apr_thread_mutex_lock(lock);
-                proxy_worker *worker = get_worker_from_id(conf, id[i], stat, server);
+                worker = get_worker_from_id(conf, id[i], stat, server);
                 apr_thread_mutex_unlock(lock);
                 if (worker == NULL)
                     continue; /* skip it */
@@ -1078,7 +1079,6 @@ static int *find_node_context_host(request_rec *r, proxy_balancer *balancer, con
         /* keep only the contexts corresponding to our balancer */
         if (balancer != NULL) {
             nodeinfo_t *node;
-            char *name;
             if (node_storage->read_node(context->node, &node) != APR_SUCCESS)
                 continue;
             if (strlen(balancer->name) > 11 && strcasecmp(&balancer->name[11], node->mess.balancer) != 0)
@@ -1150,7 +1150,6 @@ static char *get_context_host_balancer(request_rec *r)
         return NULL;
     while (*nodes != -1) {
         nodeinfo_t *node;
-        char *ret;
         if (node_storage->read_node(*nodes, &node) != APR_SUCCESS) {
             nodes++;
             continue;
