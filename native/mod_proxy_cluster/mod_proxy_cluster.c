@@ -738,8 +738,11 @@ static void update_workers_lbstatus(proxy_server_conf *conf, apr_pool_t *pool, s
                 apr_snprintf(sport, sizeof(sport), "%d", worker->port);
                 if (strcmp(worker->scheme, ou->mess.Type) ||
                     strcmp(worker->hostname, ou->mess.Host) ||
-                    strcmp(sport, ou->mess.Port))
+                    strcmp(sport, ou->mess.Port)) {
+                    /* the worker doesn't correspond to the node */
+                    ap_my_generation--; /* mark old generation that will recreate the process */ 
                     continue; /* skip it */
+                }
                 url = apr_pstrcat(pool, worker->scheme, "://", worker->hostname, ":", sport, "/", NULL);
 
                 apr_pool_create(&rrp, pool);
