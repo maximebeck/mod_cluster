@@ -673,6 +673,22 @@ static proxy_worker *get_worker_from_id(proxy_server_conf *conf, int id, proxy_w
     }
     return NULL;
 }
+/* read the node and check that it corresponds to the worker */
+static apr_status_t read_node_worker(int id, nodeinfo_t **node, proxy_worker *worker)
+{
+    char sport[7];
+    apr_status_t status = node_storage->read_node(id, node);
+    if (status != APR_SUCCESS)
+        return status;
+    apr_snprintf(sport, sizeof(sport), "%d", worker->port);
+    if (strcmp(worker->scheme, (* node)->mess.Type) ||
+        strcmp(worker->hostname, (* node)->mess.Host) ||
+        strcmp(sport, (* node)->mess.Port)) {
+        /* for some reasons it is not the right node */
+        return APR_NOTFOUND;
+    }
+    return APR_SUCCESS;
+}
 static void update_workers_lbstatus(proxy_server_conf *conf, apr_pool_t *pool, server_rec *server)
 {
     int *id, size, i;
@@ -741,12 +757,8 @@ static void update_workers_lbstatus(proxy_server_conf *conf, apr_pool_t *pool, s
                 worker->s->error_time = 0; /* Force retry now */
                 rv = proxy_cluster_try_pingpong(rnew, worker, url, conf, ou->mess.ping, ou->mess.timeout);
 
-                if (node_storage->read_node(id[i], &ou) != APR_SUCCESS)
+                if (read_node_worker(id[i], &ou, worker) != APR_SUCCESS)
                     continue;
-                if (strcmp(worker->scheme, ou->mess.Type) ||
-                    strcmp(worker->hostname, ou->mess.Host) ||
-                    strcmp(sport, ou->mess.Port))
-                    continue; /* skip it */
 
                 if (rv != APR_SUCCESS) {
                     /* We can't reach the node */
@@ -1252,7 +1264,7 @@ static proxy_worker *internal_find_best_byrequests(proxy_balancer *balancer, pro
              * not in error state or not disabled.
              * and that can map the context.
              */
-            if (node_storage->read_node(worker->id, &node) != APR_SUCCESS)
+            if (read_node_worker(worker->id, &node, worker) != APR_SUCCESS)
                 continue; /* Can't read node */
 
             if (PROXY_WORKER_IS_USABLE(worker) && iscontext_host_ok(r, balancer, worker->id)) {
@@ -1272,7 +1284,7 @@ static proxy_worker *internal_find_best_byrequests(proxy_balancer *balancer, pro
                         nodeinfo_t *node1;
                         int lbstatus, lbstatus1;
 
-                        if (node_storage->read_node(mycandidate->id, &node1) != APR_SUCCESS)
+                        if (read_node_worker(mycandidate->id, &node1, mycandidate) != APR_SUCCESS)
                             continue;
                         lbstatus1 = ((mycandidate->s->elected - node1->mess.oldelected) * 1000)/mycandidate->s->lbfactor;
                         lbstatus  = ((worker->s->elected - node->mess.oldelected) * 1000)/worker->s->lbfactor;
@@ -2193,7 +2205,7 @@ static proxy_worker *find_route_worker(request_rec *r,
                 if (worker && PROXY_WORKER_IS_USABLE(worker)) {
                     /* The context may not be available */
                     nodeinfo_t *node;
-                    if (node_storage->read_node(worker->id, &node) != APR_SUCCESS)
+                    if (read_node_worker(worker->id, &node, worker) != APR_SUCCESS)
                         return NULL; /* can't read node */
                     if (iscontext_host_ok(r, balancer, worker->id))
                        return worker;
