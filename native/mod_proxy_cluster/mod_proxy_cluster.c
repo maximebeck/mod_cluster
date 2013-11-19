@@ -2186,12 +2186,32 @@ static proxy_worker *find_route_worker(request_rec *r,
     int checking_standby;
     int checked_standby;
     int sizew = balancer->workers->elt_size;
+    char *ptr;
     
     proxy_worker *worker;
 
+   /* trace the worker table */
+    worker = (proxy_worker *)balancer->workers->elts; /* weird ? */
+    ptr = balancer->workers->elts;
+    for (i = 0; i < balancer->workers->nelts; i++, ptr=ptr+sizew) {
+        worker = (proxy_worker *)ptr;
+        if (worker->id == 0) {
+            char *myroute = "NONE";
+            if (*(worker->s->route))
+               myroute = worker->s->route;
+            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: REMOVED(%s): %s %s %d", myroute, worker->scheme, worker->hostname, worker->port);
+        } else {
+            char *myroute = "NONE";
+            if (*(worker->s->route))
+               myroute = worker->s->route;
+            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: %s : %s %s %d (%d)", myroute, worker->scheme, worker->hostname, worker->port, PROXY_WORKER_IS_USABLE(worker));
+        }
+    }
+   
+
     checking_standby = checked_standby = 0;
     while (!checked_standby) {
-        char *ptr = balancer->workers->elts;
+        ptr = balancer->workers->elts;
         worker = (proxy_worker *)balancer->workers->elts;
         for (i = 0; i < balancer->workers->nelts; i++, ptr=ptr+sizew) {
             worker = (proxy_worker *)ptr;
@@ -2202,15 +2222,21 @@ static proxy_worker *find_route_worker(request_rec *r,
                 continue;
             if (*(worker->s->route) && strcmp(worker->s->route, route) == 0) {
                 /* that is the worker corresponding to the route */
+                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: FOUND: %s : %s %s %d (%d)", 
+                             worker->s->route, worker->scheme, worker->hostname, worker->port, PROXY_WORKER_IS_USABLE(worker));
                 if (worker && PROXY_WORKER_IS_USABLE(worker)) {
                     /* The context may not be available */
                     nodeinfo_t *node;
-                    if (read_node_worker(worker->id, &node, worker) != APR_SUCCESS)
-                        return NULL; /* can't read node */
+                    if (read_node_worker(worker->id, &node, worker) != APR_SUCCESS) {
+                       ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: FOUND: can't read node");
+                       return NULL; /* can't read node */
+                    }
                     if (iscontext_host_ok(r, balancer, worker->id))
                        return worker;
-                    else
+                    else {
+                       ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: FOUND: can't read context");
                        return NULL; /* application has been removed from the node */
+                    }
                 } else {
                     /*
                      * If the worker is in error state run
@@ -2231,6 +2257,7 @@ static proxy_worker *find_route_worker(request_rec *r,
                          * balancer. Of course you will need some kind of
                          * session replication between those two remote.
                          */
+                        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: FOUND: in error :-(");
                         if (*worker->s->redirect) {
                             proxy_worker *rworker = NULL;
                             rworker = find_route_worker(r, balancer, worker->s->redirect);
