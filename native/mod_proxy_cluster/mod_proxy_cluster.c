@@ -207,6 +207,25 @@ static apr_status_t create_worker(proxy_server_conf *conf, proxy_balancer *balan
 #endif
     int sizew = conf->workers->elt_size;
 
+    /* trace the work table */
+    int i;
+    proxy_worker * myworker = (proxy_worker *)balancer->workers->elts; /* weird ? */
+    ptr = balancer->workers->elts;
+    for (i = 0; i < balancer->workers->nelts; i++, ptr=ptr+sizew) {
+        myworker = (proxy_worker *)ptr;
+        if (myworker->id == 0) {
+            char *myroute = "NONE";
+            if (*(myworker->s->route))
+               myroute = myworker->s->route;
+            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server, "create_worker: REMOVED(%s): %s %s %d", myroute, myworker->scheme, myworker->hostname, myworker->port);
+        } else {
+            char *myroute = "NONE";
+            if (*(myworker->s->route))
+               myroute = myworker->s->route;
+            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server, "create_worker: %d(%s): %s %s %d (%d)", myworker->id , myroute, myworker->scheme, myworker->hostname, myworker->port, PROXY_WORKER_IS_USABLE(myworker));
+        }
+    }
+
     /* build the name (scheme and port) when needed */
     url = apr_pstrcat(pool, node->mess.Type, "://", node->mess.Host, ":", node->mess.Port, NULL);
 
