@@ -2229,7 +2229,7 @@ static proxy_worker *find_route_worker(request_rec *r,
                     nodeinfo_t *node;
                     if (read_node_worker(worker->id, &node, worker) != APR_SUCCESS) {
                        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: FOUND: can't read node");
-                       return NULL; /* can't read node */
+                       continue;
                     }
                     if (iscontext_host_ok(r, balancer, worker->id))
                        return worker;
