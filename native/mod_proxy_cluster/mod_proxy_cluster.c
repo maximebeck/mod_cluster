@@ -231,7 +231,7 @@ static apr_status_t create_worker(proxy_server_conf *conf, proxy_balancer *balan
     } else  if ((*worker)->id == 0) {
         /* We are going to reuse a removed one */
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
-                     "Created: reusing worker for %s", url);
+                     "Created: reusing removed worker for %s", url);
         if ((*worker)->cp->pool == NULL) {
             init_conn_pool(conf->pool, *worker);
         }
@@ -251,6 +251,8 @@ static apr_status_t create_worker(proxy_server_conf *conf, proxy_balancer *balan
                 (*worker)->s->lbstatus = 0;
                 (*worker)->s->lbfactor = -1; /* prevent using the node using status message */
             }
+            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
+                         "Created: reusing removed worker for %s", url);
             return APR_SUCCESS; /* Done Already existing */
         }
         ap_log_error(APLOG_MARK, APLOG_NOTICE|APLOG_NOERRNO, 0, server,
