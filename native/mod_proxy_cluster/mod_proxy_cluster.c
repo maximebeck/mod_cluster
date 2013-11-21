@@ -252,7 +252,7 @@ static apr_status_t create_worker(proxy_server_conf *conf, proxy_balancer *balan
                 (*worker)->s->lbfactor = -1; /* prevent using the node using status message */
             }
             ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
-                         "Created: reusing removed worker for %s", url);
+                         "Created: reusing worker for %s", url);
             return APR_SUCCESS; /* Done Already existing */
         }
         ap_log_error(APLOG_MARK, APLOG_NOTICE|APLOG_NOERRNO, 0, server,
