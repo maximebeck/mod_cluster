@@ -651,20 +651,12 @@ static void update_workers_node(proxy_server_conf *conf, apr_pool_t *pool, serve
 static apr_status_t proxy_cluster_try_pingpong(request_rec *r, proxy_worker *worker,
                                                char *url, proxy_server_conf *conf,
                                                apr_interval_time_t ping, apr_interval_time_t workertimeout);
-static proxy_worker *get_worker_from_id(proxy_server_conf *conf, int id, proxy_worker_stat *stat, server_rec *server)
+static proxy_worker *get_worker_from_id(proxy_server_conf *conf, int id, proxy_worker_stat *stat)
 {
     int i;
     char *ptr = conf->workers->elts;
     int sizew = conf->workers->elt_size;
 
-    for (i = 0; i < conf->workers->nelts; i++, ptr=ptr+sizew) {
-        proxy_worker *worker = (proxy_worker *) ptr;
-        if (worker->id == id && worker->s == stat) {
-                    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
-                     "get_worker_from_id: %d %s %d", worker->id, worker->hostname, worker->port); 
-        }
-    }
-    ptr = conf->workers->elts;
     for (i = 0; i < conf->workers->nelts; i++, ptr=ptr+sizew) {
         proxy_worker *worker = (proxy_worker *) ptr;
         if (worker->id == id && worker->s == stat) {
@@ -731,7 +723,7 @@ static void update_workers_lbstatus(proxy_server_conf *conf, apr_pool_t *pool, s
                 request_rec *rnew;
                 proxy_worker *worker;
                 apr_thread_mutex_lock(lock);
-                worker = get_worker_from_id(conf, id[i], stat, server);
+                worker = get_worker_from_id(conf, id[i], stat);
                 apr_thread_mutex_unlock(lock);
                 if (worker == NULL)
                     continue; /* skip it */
@@ -769,8 +761,6 @@ static void update_workers_lbstatus(proxy_server_conf *conf, apr_pool_t *pool, s
                     /* We can't reach the node */
                     worker->s->status |= PROXY_WORKER_IN_ERROR;
                     ou->mess.num_failure_idle++;
-                    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
-                     "proxy_cluster_try_pingpong failed: %d" , ou->mess.num_failure_idle);
                     if (ou->mess.num_failure_idle > 60) {
                         /* Failing for 5 minutes: time to mark it removed */
                         ou->mess.remove = 1;
@@ -1558,16 +1548,6 @@ static int proxy_node_isup(request_rec *r, int id, int load)
         conf = (proxy_server_conf *) ap_get_module_config(sconf, &proxy_module);
         sizew = conf->workers->elt_size;
 
-        /* TODO remove : trace */
-        ptr = conf->workers->elts;
-        for (i = 0; i < conf->workers->nelts; i++, ptr=ptr+sizew) {
-            worker = (proxy_worker *)ptr;
-            if (worker->id == id && worker->s == stat) {
-                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                 "proxy_node_isup: %d %s %d", worker->id, worker->hostname, worker->port); 
-            }
-        }
-
         ptr = conf->workers->elts;
         for (i = 0; i < conf->workers->nelts; i++, ptr=ptr+sizew) {
             worker = (proxy_worker *)ptr;
@@ -2186,33 +2166,12 @@ static proxy_worker *find_route_worker(request_rec *r,
     int checking_standby;
     int checked_standby;
     int sizew = balancer->workers->elt_size;
-    char *ptr;
     
     proxy_worker *worker;
 
-   /* trace the worker table */
-    worker = (proxy_worker *)balancer->workers->elts; /* weird ? */
-    ptr = balancer->workers->elts;
-    for (i = 0; i < balancer->workers->nelts; i++, ptr=ptr+sizew) {
-        worker = (proxy_worker *)ptr;
-        if (worker->id == 0) {
-            char *myroute = "NONE";
-            if (*(worker->s->route))
-               myroute = worker->s->route;
-            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: REMOVED(%s): %s %s %d", myroute, worker->scheme, worker->hostname, worker->port);
-        } else {
-            char *myroute = "NONE";
-            if (*(worker->s->route))
-               myroute = worker->s->route;
-            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: %s : %s %s %d (%d)", myroute, worker->scheme, worker->hostname, worker->port, PROXY_WORKER_IS_USABLE(worker));
-        }
-    }
-   
-
     checking_standby = checked_standby = 0;
     while (!checked_standby) {
-        ptr = balancer->workers->elts;
-        worker = (proxy_worker *)balancer->workers->elts;
+        char *ptr = balancer->workers->elts;
         for (i = 0; i < balancer->workers->nelts; i++, ptr=ptr+sizew) {
             worker = (proxy_worker *)ptr;
             if (worker->id == 0)
@@ -2222,21 +2181,15 @@ static proxy_worker *find_route_worker(request_rec *r,
                 continue;
             if (*(worker->s->route) && strcmp(worker->s->route, route) == 0) {
                 /* that is the worker corresponding to the route */
-                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: FOUND: %s : %s %s %d (%d)", 
-                             worker->s->route, worker->scheme, worker->hostname, worker->port, PROXY_WORKER_IS_USABLE(worker));
                 if (worker && PROXY_WORKER_IS_USABLE(worker)) {
                     /* The context may not be available */
                     nodeinfo_t *node;
-                    if (read_node_worker(worker->id, &node, worker) != APR_SUCCESS) {
-                       ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: FOUND: can't read node");
+                    if (read_node_worker(worker->id, &node, worker) != APR_SUCCESS)
                        continue;
-                    }
                     if (iscontext_host_ok(r, balancer, worker->id))
                        return worker;
-                    else {
-                       ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: FOUND: can't read context");
+                    else
                        return NULL; /* application has been removed from the node */
-                    }
                 } else {
                     /*
                      * If the worker is in error state run
@@ -2257,7 +2210,6 @@ static proxy_worker *find_route_worker(request_rec *r,
                          * balancer. Of course you will need some kind of
                          * session replication between those two remote.
                          */
-                        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_route_worker: FOUND: in error :-(");
                         if (*worker->s->redirect) {
                             proxy_worker *rworker = NULL;
                             rworker = find_route_worker(r, balancer, worker->s->redirect);
